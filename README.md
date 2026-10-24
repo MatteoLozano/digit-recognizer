@@ -5,6 +5,7 @@ Draw a digit from 0 to 9 in the browser and a neural network guesses it live as 
 <p align="center">
   <img src="docs/DigitRecGif.gif" width="700" alt="Drawing digits on the canvas while the prediction updates live">
 </p>
+https://github.com/user-attachments/assets/371c3974-fc68-4fb8-8989-0b86e43456f1
 
 ## How I built it
 
