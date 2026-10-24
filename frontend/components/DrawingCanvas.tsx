@@ -3,15 +3,19 @@
 import { useEffect, useRef } from "react";
 
 const SIZE = 280; // 10 × 28, so it scales down cleanly to 28×28 later
+const PREDICT_INTERVAL = 100; // ms between live predictions while drawing
 
 type Props = {
-  onPredict: (pixels: number[]) => void;
+  onPredict: (pixels: number[]) => Promise<void>;
   onClear: () => void;
 };
 
 export default function DrawingCanvas({ onPredict, onClear }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawing = useRef(false);
+  const coolingDown = useRef(false);
+  const inFlight = useRef(false);
+  const pending = useRef(false); // the drawing changed while a request was running
 
   // Runs once after the canvas appears in the browser
   useEffect(() => {
@@ -44,6 +48,7 @@ export default function DrawingCanvas({ onPredict, onClear }: Props) {
     ctx.moveTo(x, y);
     ctx.lineTo(x, y); // draws a dot even if you only click
     ctx.stroke();
+    requestPrediction();
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -53,10 +58,13 @@ export default function DrawingCanvas({ onPredict, onClear }: Props) {
     const { x, y } = getPosition(e);
     ctx.lineTo(x, y);
     ctx.stroke();
+    requestPrediction();
   }
 
   function handlePointerUp() {
+    if (!isDrawing.current) return;
     isDrawing.current = false;
+    requestPrediction(true); // final prediction for the finished stroke
   }
 
    function handleClear() {
@@ -88,33 +96,59 @@ export default function DrawingCanvas({ onPredict, onClear }: Props) {
     return pixels;
   }
 
-  function handlePredict() {
+  // Sends at most one request at a time, and at most one every PREDICT_INTERVAL
+  // unless forced. Changes made during a request are sent once it finishes.
+  async function requestPrediction(force = false) {
+    if (inFlight.current) {
+      pending.current = true;
+      return;
+    }
+    if (!force && coolingDown.current) return;
+
     const pixels = getPixels();
-    if (pixels) onPredict(pixels);
+    if (!pixels) return;
+
+    inFlight.current = true;
+    coolingDown.current = true;
+    setTimeout(() => (coolingDown.current = false), PREDICT_INTERVAL);
+    await onPredict(pixels);
+    inFlight.current = false;
+
+    if (pending.current) {
+      pending.current = false;
+      requestPrediction(true);
+    }
   }
 
 return (
     <div className="flex flex-col items-center gap-4">
-      <canvas
-        ref={canvasRef}
-        width={SIZE}
-        height={SIZE}
-        className="rounded-lg border border-zinc-300 touch-none cursor-crosshair"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
-      />
+      <div className="relative w-full max-w-80 aspect-square rounded-xl bg-black shadow-[0_12px_32px_-12px_rgb(0_0_0/0.5)] ring-1 ring-line">
+        <canvas
+          ref={canvasRef}
+          width={SIZE}
+          height={SIZE}
+          className="block size-full rounded-xl touch-none cursor-crosshair"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
+        />
+        {/* Purely decorative 28×28 grid showing the model's input resolution */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-xl bg-[linear-gradient(to_right,rgb(255_255_255/0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgb(255_255_255/0.05)_1px,transparent_1px)] bg-size-[calc(100%/28)_calc(100%/28)]"
+        />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute bottom-2 right-3 font-mono text-[10px] tracking-widest text-white/35"
+        >
+          28×28
+        </span>
+      </div>
       <div className="flex gap-3">
         <button
-          onClick={handlePredict}
-          className="rounded-full bg-blue-600 text-white px-6 py-2 hover:bg-blue-700"
-        >
-          Predict
-        </button>
-        <button
           onClick={handleClear}
-          className="rounded-full border border-zinc-300 px-6 py-2 hover:bg-zinc-100"
+          className="rounded-full border border-line bg-paper px-6 py-2 font-mono text-xs uppercase tracking-[0.2em] transition-colors hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:scale-95"
         >
           Clear
         </button>
